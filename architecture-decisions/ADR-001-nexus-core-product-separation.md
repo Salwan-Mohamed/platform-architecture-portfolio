@@ -1,91 +1,88 @@
-# ADR-001: Core/Product Separation Model
+# ADR-001: Nexus Core/Product Separation Model
 
 **Status:** Accepted  
-**Date:** 2026-01-23  
+**Date:** 2025-12-07  
 **Decider:** Salwan Mohamed  
-**Domain:** Governance  
-**Project:** Nexus Platform Engineering
+**Project:** Nexus Platform Engineering  
 
 ---
 
 ## Context
 
-Building a platform for Sinai University (3 campuses, multi-vendor environment) created an immediate tension: every architecture decision was both universal ("GitOps is better than manual ops") and environment-specific ("FortiGate 1101E is the firewall at Kantra site").
+Building a platform for Sinai University required a system that could apply the same governance principles across multiple sites (3 campuses) with different physical infrastructure, different vendor constraints, and different operational maturity levels. The initial approach of a single monolithic repository quickly produced conflicts: environment-specific configuration was polluting architectural doctrine; vendor tool choices were being promoted to principles; and each site's operational team wanted to diverge without governance oversight.
 
-If these two types of decisions live in the same repository, one of two failure modes occurs:
-1. **Doctrine becomes polluted with vendor details** — the platform becomes non-portable and future environments can't benefit from the thinking
-2. **Implementation details get lost in abstraction** — operators can't find what they need to actually run the environment
-
-The question: how do you maintain architectural integrity across both levels simultaneously?
+The core question was: **how do you separate what is universally true about your platform from what is specific to where you deploy it?**
 
 ---
 
 ## Constraints
 
-- Single engineer initially — governance overhead must be sustainable
-- University budget — vendor choices are constrained by licensing and existing investments
-- Operational team with varying technical maturity — documentation must be findable and actionable
-- Need to eventually support multiple environments — architecture must be reusable without copy-paste
+| Constraint | Impact |
+|------------|--------|
+| 3 campus sites with different network topologies | Single config model would require constant overrides |
+| Limited platform team (1 principal + site ops) | Cannot maintain N diverging forks independently |
+| University budget cycles | Vendor choices must be stable; can't refactor the core every procurement cycle |
+| Junior site operators must be able to consume the platform | Doctrine cannot require deep architectural understanding |
+| Decisions must be auditable for university governance | Every change needs a traceable owner and rationale |
 
 ---
 
 ## Decision
 
-**Separate the platform into two distinct repository types: a vendor-agnostic Core (principles + governance + ADRs) and environment-specific Product repositories (vendor choices + configurations + implementation ADRs), with a strict one-way authority relationship where Core always wins.**
+**Separate the platform into two distinct layers: a vendor-agnostic Core (defines principles, governance, capability contracts, and ADRs) and Product repositories (implement Core contracts with specific vendor choices for a specific environment).**
+
+Core repository: `nexus-platform-engineering`  
+Product repository: `nexus-platform-product-sinai-university`
+
+Authority direction is one-way: **Core → Product**. Products cannot modify Core. If a Product ADR conflicts with a Core ADR, the Core wins.
 
 ---
 
 ## Alternatives Considered
 
 | Option | Reason Rejected |
-|--------|-----------------|
-| Single monolithic repository | Doctrine gets polluted with vendor specifics; non-portable; impossible to reuse for future environments |
-| Separate repos with no formal relationship | Implementations drift from principles; no traceability; governance becomes performative |
-| Fork-per-environment model | Forks diverge; principle changes don't propagate; creates N copies of the same thinking |
-| Wiki-based documentation | No versioning; no change control; no authority model; becomes stale immediately |
+|--------|----------------|
+| **Single monorepo with environment folders** | Environment-specific config would pollute architectural doctrine; no clean governance boundary |
+| **Full fork per environment** | Creates N independent codebases; governance and doctrine drift inevitable; no upgrade path |
+| **Helm values per environment** | Solves config, not governance; doesn't address ADR authority or architectural principles |
+| **Shared library + environment repos** | Closer, but doesn't define the authority model or what cannot be overridden |
 
 ---
 
 ## Trade-offs
 
-**Given up:** Simplicity. A single repo is easier to navigate when you know where everything is.
+**What we gained:**
+- Architectural doctrine is stable and auditable; 183 ADRs define the Core
+- Products are disposable — can replace the Sinai University implementation without touching Core
+- New environments can consume Core directly without forking governance
+- Site operators consume capability contracts, not architectural complexity
 
-**Gained:**
-- Nexus Core can evolve independently of any specific vendor environment
-- Sinai University Product can be replaced entirely (different vendor stack) without changing platform doctrine
-- Other environments (future) can implement the Core without inheriting Sinai-specific configurations
-- Compliance checking is scriptable: `core-compliance-checker.sh` validates that Product ADRs reference Core ADRs
+**What we gave up:**
+- Initial overhead of defining the Core/Product boundary explicitly
+- Product ADRs must reference Core ADRs — more documentation discipline required
+- Cannot take a "quick shortcut" in a Product without acknowledging the governance debt
 
 ---
 
 ## Consequences
 
-**Positive:**
-- Nexus Platform Core reached 183 ADRs in STEWARDSHIP mode — architecturally complete
-- Sinai University Product has 14 Implementation ADRs, all referencing Core
-- The authority model is explicit: `if this repository conflicts with the core, the core wins`
-- Future environments can be created as new Product repositories consuming the same Core
-
-**Negative:**
-- Cognitive overhead of navigating two repositories
-- Contributors must understand the Core/Product boundary before making changes
-- Risk of Product ADRs being written without Core references (mitigated by compliance scripts)
+- Nexus Platform Core reached v14.0 with 183 ADRs in STEWARDSHIP MODE (architecturally complete)
+- Sinai University Product has 14 implementation ADRs, each referencing the Core capability it satisfies
+- A compliance checker script validates that Product ADRs don't contradict Core principles
+- The model is now portable: any new organization can consume the Core and create their own Product
 
 ---
 
 ## Evidence
 
-- [nexus-platform-engineering](https://github.com/Salwan-Mohamed/nexus-platform-engineering) — Core repository: 183 ADRs, vendor-agnostic
-- [nexus-platform-product-sinai-university](https://github.com/Salwan-Mohamed/nexus-platform-product-sinai-university) — Product: 14 implementation ADRs
-- [AUTHORITY.md](https://github.com/Salwan-Mohamed/nexus-platform-product-sinai-university/blob/main/AUTHORITY.md) — Explicit authority model
-- Compliance checker script: `scripts/core-compliance-checker.sh`
+- [nexus-platform-engineering README](https://github.com/Salwan-Mohamed/nexus-platform-engineering) — Core/Product boundary definition
+- [nexus-platform-product-sinai-university AUTHORITY.md](https://github.com/Salwan-Mohamed/nexus-platform-product-sinai-university/blob/main/AUTHORITY.md) — Authority model enforcement
+- [Capability Mapping Table](https://github.com/Salwan-Mohamed/nexus-platform-product-sinai-university#capability-mapping) — 14 Core → Product capability implementations
+- Core ADR-0135: Design-First Architecture Repository
+- Core ADR-0091: Nexus Platform Philosophy
 
 ---
 
-## Operational Lesson
+## Principal-Level Signal
 
-The Core/Product separation paid off immediately when the FortiGate implementation ADR needed to be revised. The revision only affected `nexus-platform-product-sinai-university` — the Core doctrine ("Firewall is a platform capability contract") was unchanged. Without the separation, a vendor-specific change would have required validating its impact on all platform principles.
-
----
-
-*This ADR documents a decision made at the architectural foundation of the Nexus Platform. It is the governance primitive from which all other decisions derive.*
+> This decision separates **what your platform believes** from **what your platform runs on**. It is the difference between an infrastructure team and a platform engineering organization. Most teams never make this separation explicit — which is why their platforms become tightly coupled to vendor choices and cannot evolve without full rewrites.

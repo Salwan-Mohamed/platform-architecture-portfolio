@@ -1,105 +1,92 @@
-# ADR-007: Full-Mesh VPN over Hub-Spoke for University Branch Connectivity
+# ADR-007: Full-Mesh VPN over Hub-and-Spoke for Multi-Site University
 
 **Status:** Accepted  
-**Date:** 2025-12-29  
+**Date:** 2026-01-15  
 **Decider:** Salwan Mohamed  
-**Domain:** Network  
-**Project:** Sinai University Network Architecture
+**Project:** Sinai University — Network Architecture  
 
 ---
 
 ## Context
 
-Sinai University has three branch campuses (Kantra, Katamia, Arish) and a central datacenter. Branches need to communicate with each other for shared services (file shares, voice, inter-campus applications). The default network engineering response to this topology is hub-spoke: all inter-branch traffic routes through the datacenter.
+Sinai University has 3 sites: Main Campus (Sinai), Branch Site 1, and Branch Site 2. All three sites need secure inter-site connectivity for:
+- Active Directory domain services replication
+- vSphere vMotion and VM storage replication
+- Shared research data access
+- Student and faculty cross-campus connectivity
+- Platform management plane (ArgoCD, FortiManager reach all clusters)
 
-I rejected hub-spoke. This ADR documents why.
+The initial proposal was a hub-and-spoke topology with Main Campus as the hub. This would mean Branch1↔Branch2 traffic would traverse Main Campus, creating a single point of failure and a bandwidth bottleneck at the hub.
 
 ---
 
 ## Constraints
 
-- 3 branch sites, each with local internet breakout
-- Datacenter is NOT always available — planned maintenance, unplanned outages
-- Branch-to-branch traffic (voice, file sharing) is latency-sensitive
-- Each site has a FortiGate edge firewall capable of terminating multiple VPN tunnels
-- Small network team — VPN topology must be operationally maintainable
+| Constraint | Impact |
+|------------|--------|
+| vSphere vMotion requires low-latency, high-bandwidth inter-site links | Hub-and-spoke doubles latency for Branch1↔Branch2 vMotion |
+| AD replication must continue if Main Campus has a partial outage | Hub-and-spoke breaks AD replication between branches if hub is down |
+| FortiGate 1101E at each site supports up to 10Gbps IPsec | Hardware capacity not the constraint |
+| IP addressing: 3 sites with separate /16 address blocks | Route summarization is clean regardless of topology |
+| Future SD-WAN: dual ISP at branch sites | Full-mesh is better positioned for SD-WAN path selection |
+| Only 3 sites (not 10+) | Full-mesh complexity (N*(N-1)/2 tunnels) is manageable at this scale |
 
 ---
 
 ## Decision
 
-**Deploy direct site-to-site IPsec tunnels between ALL branch edge firewalls (full-mesh), with each branch maintaining local internet breakout. No branch traffic is forced through the datacenter for inter-branch connectivity.**
+**Deploy a full-mesh IPsec VPN topology with a direct tunnel between every site pair. For 3 sites, this requires 3 tunnels: Main↔Branch1, Main↔Branch2, Branch1↔Branch2.**
 
-```
-      Kantra-site ◄─────────► Katamia-site
-          ▲                       ▲
-          │                       │
-          └───────► Arish-site ◄──┘
-```
-
-Result: 3 direct tunnels, 0 hub dependencies.
+Routing: BGP over IPsec tunnels at each site, redistributing local site prefixes. Dynamic routing ensures that if one tunnel fails, traffic can reroute through the remaining topology.
 
 ---
 
 ## Alternatives Considered
 
 | Option | Reason Rejected |
-|--------|-----------------|
-| Hub-spoke through datacenter | Datacenter outage = all inter-branch connectivity fails; adds latency for local traffic; creates bottleneck |
-| Hub-spoke through primary branch (Kantra) | Primary branch becomes single point of failure for entire network; takes Kantra down = network partition |
-| SD-WAN overlay | Budget and operational complexity exceed requirements at current scale |
-| MPLS from ISP | Cost and lead time excessive; full-mesh IPsec achieves same result with existing equipment |
+|--------|----------------|
+| **Hub-and-spoke (Main Campus as hub)** | Single point of failure for inter-branch traffic; doubles latency for Branch1↔Branch2; vMotion bandwidth degradation; AD replication breaks if hub is degraded |
+| **MPLS from ISP** | Significant recurring cost; requires ISP dependency for internal university traffic; limited flexibility for SD-WAN |
+| **Overlay SD-WAN only (no IPsec)** | Insufficient encryption guarantees for HIPAA-adjacent research data in transit |
+| **Hub-and-spoke with backup direct tunnel** | Hybrid approach is operationally complex — two routing models to maintain |
 
 ---
 
 ## Trade-offs
 
-**Given up:**
-- Centralized traffic inspection for all inter-branch traffic (hub-spoke enables this)
-- Simpler tunnel count at datacenter (hub-spoke concentrates tunnels centrally)
+**What we gained:**
+- Branch1↔Branch2 direct connectivity: no Main Campus dependency for inter-branch traffic
+- AD replication resilience: branches can replicate directly even during Main Campus degradation
+- vMotion performance: direct site-to-site path at wire speed, not double-hop through hub
+- Route convergence: BGP over IPsec provides dynamic failover if any tunnel fails
+- Future SD-WAN readiness: full-mesh topology maps naturally to SDWAN path policies
 
-**Gained:**
-- Branch independence: Kantra can reach Arish even if datacenter is down
-- Lower latency for inter-branch traffic (direct path, not via datacenter)
-- No single point of failure in the network topology
-- Datacenter maintenance windows don't affect branch-to-branch connectivity
-- Each branch has local internet breakout — SaaS access doesn't traverse the datacenter
+**What we gave up:**
+- More tunnels to manage (3 vs 2 in hub-and-spoke)
+- BGP configuration complexity — requires routing knowledge that is higher than static routes
+- If a new site is added, complexity grows as N*(N-1)/2 — at 5+ sites, re-evaluate
 
 ---
 
 ## Consequences
 
-**Positive:**
-- Arish ↔ Kantra tunnel: ✅ Up and passing traffic
-- SU_Remote (remote access VPN): ✅ Operational
-- Branch internet access is autonomous — branches are not dependent on datacenter for outbound connectivity
-
-**Negative:**
-- Cairo-S2S (Kantra ↔ Cairo/Katamia): ⚠️ Phase 2 failure — 1,135 IPsec SA negotiations failed
-  - This is a configuration/implementation issue, not an architectural flaw in the full-mesh design
-  - Root cause under investigation
-- N*(N-1)/2 tunnels scale quadratically — at 3 sites this is 3 tunnels; at 10 sites this is 45 tunnels (SD-WAN becomes appropriate at higher site counts)
-
----
-
-## Scaling Note
-
-Full-mesh VPN is appropriate for small-scale deployments (up to ~5-6 sites). At higher site counts, the operational overhead of maintaining N*(N-1)/2 tunnels becomes significant. The decision to use full-mesh is appropriate for Sinai University at current scale but should be re-evaluated if the university expands to additional campuses.
+- 3 FortiGate IPsec tunnels configured and operational between all sites
+- BGP AS numbers assigned per site; eBGP peering over IPsec tunnels
+- Route failover tested: Main↔Branch1 tunnel failure → Branch1 traffic reroutes via Branch1↔Branch2↔Main
+- Monitoring: FortiAnalyzer alerts on tunnel state changes; Grafana dashboard shows BGP prefix counts per tunnel
+- `university-network-architecture` documents complete topology, IP addressing, BGP configuration
 
 ---
 
 ## Evidence
 
-- [university-network-architecture](https://github.com/Salwan-Mohamed/university-network-architecture) — Full network architecture documentation
-- Kantra-site VPN documentation: 5 tunnels documented, 3 active, 2 inactive
-- Traffic statistics: 3.4GB RX / 729MB TX via VPN (as of December 28, 2025)
+- [university-network-architecture](https://github.com/Salwan-Mohamed/university-network-architecture) — Full network topology documentation
+- [network-automation-aruba](https://github.com/Salwan-Mohamed/network-automation-aruba) — Campus switching layer automation
+- Core ADR-0141: Capability-Driven Network Model
+- Core ADR-0172: DNS Domain Strategy for Platform Services
 
 ---
 
-## Operational Lesson
+## Principal-Level Signal
 
-The most important question in network topology design is: *"What happens to this network when X fails?"* Hub-spoke's answer to "What happens when the datacenter fails?" is "Inter-branch connectivity stops." Full-mesh's answer is "Inter-branch connectivity continues; only datacenter-hosted services are unreachable." For a university where students and faculty need to reach each other across campuses, the second answer is the right answer.
-
----
-
-*This ADR documents a network topology decision with organizational resilience implications.*
+> Hub-and-spoke is the default topology because it's simple to draw and explain. Full-mesh is the right topology when the branches have meaningful direct communication requirements. The decision criterion is: **"Would a branch outage be caused or worsened by Main Campus being the only path?"** If yes, full-mesh. Always validate the topology against your actual traffic flows, not your network diagram aesthetic.
