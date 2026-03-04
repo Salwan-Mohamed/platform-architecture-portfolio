@@ -1,148 +1,134 @@
 # Platform Governance Model
-## Nexus Platform — Sinai University
+
+> How decisions are made, recorded, and enforced across the Nexus Platform System.
 
 ---
 
 ## Governance Philosophy
 
-Governance is not a process layer on top of the platform. **Governance is the platform.**
+The Nexus Platform is an **organizational coordination system implemented with GitOps**. It is defined by what it coordinates, not what it's built on. Governance is not a layer on top of the platform — it is the platform's foundation.
 
-A platform without governance is a collection of tools. Tools degrade. Decisions made in tools get forgotten. The platform becomes what was convenient, not what was designed.
+Three principles underpin all governance decisions:
 
-The Nexus Platform governance model has three mechanisms:
-1. **ADRs** — architectural decisions recorded before implementation begins
-2. **Phase gates** — advancement requires explicit evidence, not elapsed time
-3. **Authority contracts** — who can decide what, bounded, explicit, traceable
-
----
-
-## Authority Model
-
-```
-GIT (Single Control Plane)
-  │
-  ├──► BASELINE AUTOMATION ──► Infrastructure + ResourceQuotas + Network Policy
-  ├──► RUNTIME AUTOMATION ───► Operations (24h backport SLA for incidents)
-  ├──► AI AGENTS ──────────► Advisory only. Cannot execute. Cannot approve.
-  └──► HUMAN OWNER ───────► Sole decision authority. Final approval for all gates.
-```
-
-### Invariants (Cannot Change Without Constitutional Amendment)
-
-| Invariant | Rule |
-|-----------|------|
-| No Human Gate | Platform capabilities must not require manual approval to consume |
-| No SDLC Bypass | Changes follow full software development lifecycle |
-| No Post-Hoc Observability | Observability defined before implementation |
-| Ownership = Accountability | Unclear ownership blocks capability |
-| Tooling Follows Architecture | Tools don't define architecture; architecture defines tools |
-| AI Is Not an Actor | AI recommends; humans decide |
+1. **Authority must be explicit.** Every decision has a named owner with bounded scope. Implicit authority is not authority.
+2. **Evidence precedes decisions.** Opinions do not override signals. Decisions without observable signal references are rejected.
+3. **Enforcement before convenience.** Shortcuts that bypass governance are not permitted even under urgency. The exception path is gated, not bypassed.
 
 ---
 
-## ADR Governance
+## Governance Layers
 
-### What Requires an ADR
+### Layer 1: Platform Philosophy (Immutable)
 
-| Decision Type | ADR Required? |
-|--------------|---------------|
-| Choosing a new tool or vendor | YES |
-| Changing a network topology | YES |
-| Introducing a new security boundary | YES |
-| Modifying an existing security policy | YES |
-| Adding a new platform capability | YES |
-| Updating configuration for existing capability | NO (config change, not architecture) |
-| Operational runbook updates | NO (operational, not architectural) |
+Defined in Nexus Core ADR-0091. Cannot be changed by any agent, including Human Owner, without a Core constitution amendment.
 
-### ADR Lifecycle
+| Principle | Statement |
+|-----------|-----------|
+| Agnostic Core | The Core is runtime-, vendor-, and orchestrator-agnostic |
+| Core/Product Separation | Core defines principles; Products implement with vendor choices |
+| ADRs as Governance | Architecture Decision Records are the authoritative governance mechanism |
+| Phase-Based Maturity | Four phases; advancement is optional, not assumed |
+| No Implicit Authority | All authority must be explicitly defined and traceable |
+| Git as Control Plane | Git is the single source of truth for all platform state |
+| Intent Before Automation | Define what you want before automating how to get it |
 
-```
-Proposed → Review (Human Owner) → Accepted | Rejected
-                                          │
-                                          ▼
-                                    Implementation
-                                          │
-                                          ▼
-                               Superseded (when replaced)
-                               or Deprecated (when retired)
-```
-
-### ADR Authority Hierarchy for Sinai University
+### Layer 2: Authority Model
 
 ```
-Nexus Core ADRs (nexus-platform-engineering)
-  │ Defines: WHAT capabilities must exist, governance principles, phase boundaries
-  │ Authority: IMMUTABLE without exceptional justification
-  │
-  ▼
- Implementation ADRs (nexus-platform-product-sinai-university)
-  │ Defines: HOW capabilities are realized at Sinai University
-  │ Authority: Must reference a Core ADR; Core always wins in conflicts
-  │
-  ▼
- Portfolio ADRs (this repository)
-    Defines: Cross-cutting architecture decisions and patterns
-    Authority: Documents portfolio-level thinking; informational for other environments
+GIT (Control Plane)
+ |
+ +---> BASELINE AUTOMATION ----> Infrastructure + ResourceQuotas
+ +---> RUNTIME AUTOMATION -----> Operations (24h backport SLA)
+ +---> AI ---------------------> Advisory only (cannot execute)
+ +---> DEVELOPERS -------------> Phase D only (golden paths)
 ```
+
+**Stop Authority (Non-Negotiable Precedence):**
+1. Production Operations — stability breach
+2. Governance & Risk — correctness violation
+3. Platform Engineering — evolution degradation
+4. Evolutionary Control Loop — bypass attempt
+5. TPO — value signal failure
+
+### Layer 3: ADR Governance
+
+All architectural decisions are documented as Architecture Decision Records (ADRs). ADR governance rules:
+
+| Rule | Scope |
+|------|-------|
+| All Core ADRs are vendor-agnostic | Core only |
+| Product ADRs must reference a Core ADR | Product ADRs |
+| No Product ADR may contradict a Core ADR | Product ADRs |
+| ADR status must be maintained | All ADRs |
+| Superseded ADRs are versioned, not deleted | All ADRs |
+
+**ADR Status Lifecycle:**
+- `Proposed` → Under discussion
+- `Accepted` → Approved and in effect
+- `Superseded` → Replaced by a newer ADR (linked)
+- `Deprecated` → No longer applicable; reason documented
+
+### Layer 4: Signal-Driven Decision Validation
+
+Every architectural decision must reference at least one signal from the canonical Signals Registry:
+
+| Signal Category | Examples |
+|-----------------|----------|
+| Correctness | Policy enforcement rate, config drift %, contract validation pass rate |
+| Value | Capability adoption rate, effort displacement %, time-to-production delta |
+| Stability | Error rate trends, incident frequency, rollback frequency |
+| Evolution | Time-to-introduce-capability, coupling indicators, blast-radius containment |
+
+**Rule:** Decisions without signal reference are rejected. Signal definitions must have named owners.
+
+### Layer 5: Phase Gate Governance
+
+Phase advancement (A→B→C→D) requires:
+- Exit criteria explicitly documented and verified
+- Human Owner sign-off
+- Coverage thresholds met
+- Evidence package complete
+- Rollback option defined
+
+Phase transitions are **optional** — an organization can be permanently successful at Phase A.
 
 ---
 
-## Phase Gate Framework
+## Governance Anti-Patterns
 
-| Phase | Product | Entry Criteria | Exit Criteria |
-|-------|---------|---------------|---------------|
-| A | Infrastructure Control | Team exists; Git initialized | Stability signals baseline; Core services in Git; no ad-hoc changes |
-| B | Explainable Platform | Phase A stable 30+ days | Observability all 8 axes active; SLOs defined; error budgets tracked |
-| C | Organizational Memory | Phase B stable 30+ days | Knowledge base operational; self-service catalog defined |
-| D | Governed Self-Service | Phase C stable 30+ days | Developer platform active; golden paths operational |
+These patterns are explicitly prohibited in the Nexus governance model:
 
-**Critical Rule: Advancement is optional, not assumed. Phase A is a complete, standalone product.**
+| Anti-Pattern | Why It's Prohibited |
+|-------------|--------------------|
+| AI auto-approving ADRs | Violates Human Owner authority; produces governance theater |
+| Verbal decisions without ADR follow-up | Non-auditable; tribal knowledge accumulation |
+| Phase D features before Phase A stability | Builds showroom on unstable foundation |
+| Overriding signals with opinions | Defeats signal-driven decision validation |
+| Implicit risk acceptance ("we'll deal with it") | Risk must be explicitly documented and accepted |
+| Emergency changes bypassing change control | Even emergency paths must be gated and documented |
 
 ---
 
-## Change Control
+## Governance Compliance Validation
 
-### Change Categories
+```bash
+# Validate Product ADR compliance with Core
+./scripts/core-compliance-checker.sh
 
-| Category | Description | Approval Required |
-|----------|-------------|------------------|
-| P1 - Critical | Security boundaries, network topology, identity | Human Owner + Architecture review |
-| P2 - Significant | New capabilities, platform component upgrades | Human Owner |
-| P3 - Standard | Configuration updates, runbook changes | PM approval |
-| P4 - Routine | Documentation, dashboards, non-breaking | PR approval |
+# Check Core version sync status
+./scripts/core-sync-status.sh
 
-### Change Flow
-
-```
-Propose (PR opened)
-  │
-  ▼
- Review (by severity-appropriate approver)
-  │
-  ▼
- Evidence check (links to evidence/config required for P1/P2)
-  │
-  ▼
- Approve → Merge to main → ArgoCD reconciles
-  OR
- Reject (with documented reason)
+# Validate signal registry completeness
+python governance/validate-signals.py
 ```
 
 ---
 
-## Signal-Based Decision Validation
+## Related Documents
 
-Every platform decision is validated against signals, not opinions.
-
-| Signal Domain | Examples | ADR Reference Required |
-|--------------|----------|------------------------|
-| Correctness | Policy enforcement, config drift, contract validation | YES for P1/P2 decisions |
-| Value | Adoption rate, effort displacement, time-to-production | YES for capability decisions |
-| Stability | Error rate, latency variance, incident frequency | YES for architecture decisions |
-| Evolution | Time-to-introduce capability, coupling indicators | YES for governance decisions |
-
-**Rule: Signals without owners are invalid. Thresholds defined post-incident are invalid.**
-
----
-
-*This governance model is the foundation of the Nexus Platform. Without it, the platform is just infrastructure. With it, the platform is an organizational coordination system.*
+| Document | Location |
+|----------|----------|
+| Nexus Platform Core | [nexus-platform-engineering](https://github.com/Salwan-Mohamed/nexus-platform-engineering) |
+| Platform Operating System | [platform-operating-system](https://github.com/Salwan-Mohamed/platform-operating-system) |
+| ADR Library | [architecture-decisions/](../architecture-decisions/) |
+| Case Studies | [case-studies/](../case-studies/) |
