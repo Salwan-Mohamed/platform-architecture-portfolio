@@ -1,0 +1,15 @@
+# Discovery Reports
+
+This directory contains output from the Discovery Agent.
+
+To run the Discovery Agent:
+```
+Discovery Agent: analyze [repo-name]
+```
+
+Reports are generated as:
+`[repo-name]-report.md`
+
+## Reports Available
+
+_None yet. Run the Discovery Agent to generate reports._
