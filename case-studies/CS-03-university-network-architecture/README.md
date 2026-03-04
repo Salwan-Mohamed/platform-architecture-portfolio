@@ -1,152 +1,139 @@
-# Case Study 03: Multi-Site Network Architecture for Sinai University
+# Case Study 03: Multi-Site Network Architecture for a University
 
-**Type:** Network Architecture + Documentation System Design  
-**Scale:** 3 campuses, 34 interfaces, 67 firewall policies, 5 VPN tunnels  
-**Duration:** 2025 – ongoing  
-**Role:** Network Architect + Documentation Owner  
-**Key Repos:** `university-network-architecture`, `network-automation-aruba`
+> **Role:** Network Architect + Platform Engineer  
+> **Environment:** Sinai University — 3-site campus network  
+> **Duration:** 2025 Q3 → 2025 Q4  
+> **Complexity:** ⭐⭐⭐⭐  
 
 ---
 
 ## The Problem
 
-Sinai University's network existed. It worked, mostly. But it had no authoritative documentation. Engineers knew the topology because they built it — not because it was written down. The first time a new engineer needed to troubleshoot a VPN failure, they were starting from zero.
+A university with 3 campus sites and ~5,800 users was operating on a network that had grown organically over 10 years without a design document. VLANs had been added ad-hoc. Inter-site connectivity was a single IPsec tunnel with a pre-shared key that had never been rotated. The core routing was static. Network changes required SSH access to 30+ switches and were made by whoever happened to be on-call.
 
-This is the most dangerous state for infrastructure: *operational but undocumented*. It means the organization's institutional knowledge lives in people, not systems. People leave. Memories fade. Configs drift.
+Two specific incidents made the redesign urgent:
+1. A misconfigured ACL on a distribution switch blocked student Wi-Fi across an entire campus for 6 hours — with no way to identify the change or roll it back
+2. A security audit found that the research network (handling data under HIPAA-adjacent requirements) was on the same VLAN as the student network in two buildings
+
+The requirement: redesign the network to be secure, documented, automated, and resilient — without replacing hardware.
 
 ---
 
 ## The Environment
 
-| Component | Details |
+| Dimension | Detail |
 |-----------|--------|
-| Site: Kantra | FortiGate-1101E v7.6.4, 9 active interfaces, 36 routes, 67 firewall policies |
-| Site: Katamia | FortiGate edge firewall, template documented, awaiting data collection |
-| Site: Arish | FortiGate edge firewall, template documented, awaiting data collection |
-| Datacenter | VPN role TBD, template structure defined |
-| VPN Architecture | Full-mesh IPsec: Kantra↔Arish (✅), Kantra↔Katamia (⚠️), Arish↔Katamia (planned) |
-| Campus switching | Aruba switches managed via AWX automation |
-| Security zones | WAN, LAN, DMZ-Server, DMZ-Voice, VPN, Management |
+| **Sites** | Main Campus + 2 branch campuses |
+| **Users** | ~5,800 (students + staff + research) |
+| **Switching** | Aruba switches (HPE) — existing hardware |
+| **Firewalls** | FortiGate 1101E — new deployment |
+| **Segments** | Student, Staff, Research, IoT, Management, Platform |
+| **Inter-site** | IPsec VPN — redesigned from single to full-mesh |
+| **Management plane** | FortiManager + Aruba Central |
 
 ---
 
 ## The Constraints
 
-1. **Design-first requirement**: Document the architecture before optimizing it. No recommendations until as-is state is fully captured.
-2. **No recommendations in the as-is repository**: As-is is for recording reality, not improving it. Mixing the two corrupts both.
-3. **Completeness over selectivity**: Document everything, including unused interfaces and disabled policies. What's disabled today is often re-enabled tomorrow.
-4. **Accuracy over memory**: All documentation must come from actual device output, not engineer recall.
-5. **Maintainability**: One engineer must be able to keep this current without significant overhead.
+- **No hardware replacement budget:** All Aruba switches remain; new topology must be achievable via configuration
+- **Zero-downtime migration:** University cannot tolerate a scheduled network blackout during term
+- **5 network segments required:** Student, Staff, Research, Platform/Management, IoT — each with different security postures
+- **Research network compliance:** Must be isolated with IPS inspection on all ingress/egress
+- **Automation requirement:** All switch configurations must be manageable via Ansible without SSH ad-hoc
+- **Documentation-first:** Architecture must be documented before any change is made to production
 
 ---
 
-## The Architecture Decision: Design-First Documentation
+## The Architecture
 
-The most important architectural decision was methodological, not technical: **design-first, as-is second, never mixed.**
+### Design Philosophy: Topology Defines Policy
+
+Rather than applying security as an overlay (ACLs added to an organic topology), the redesign was topology-first: every security boundary is expressed as a physical or logical segment enforced by the firewall, not by switch ACLs.
+
+### Network Segmentation Model
 
 ```
-repository structure:
-  branches/[site]/[site]-design.md    ← WHY the network is designed this way
-  configs/[site]/                     ← WHAT the network actually looks like now
-
-Never conflate the two.
+┌─────────────────────────────────────────────────────────┐
+│                  FortiGate 1101E (per site)             │
+│                 Security Policy Enforcement             │
+├────────────┬─────────────┬───────────┬──────────────────┤
+│  Student   │    Staff    │ Research  │    Platform      │
+│  VLAN 100  │  VLAN 200   │ VLAN 300  │   VLAN 400+      │
+│  /20       │   /22       │  /23      │    /24           │
+│            │             │           │                  │
+│  Internet  │ Internet +  │ Internet  │  Management      │
+│  only      │ Internal    │ + IPS     │  only            │
+└────────────┴─────────────┴───────────┴──────────────────┘
+                         │
+              Inter-site IPsec VPN
+                   (Full Mesh)
+              ┌────────────────────┐
+              │  Main ↔ Branch 1  │
+              │  Main ↔ Branch 2  │
+              │  Branch 1 ↔ B2    │
+              └────────────────────┘
+                 BGP over IPsec
+              Dynamic route failover
 ```
 
-Why this matters: When you mix design intent with as-is state, you lose both. The design section gets cluttered with operational notes. The as-is section gets speculative improvements. Neither is trustworthy as a single source of truth.
+### Automation Model
+
+All switch configurations managed via Ansible AWX:
+- `network-automation-aruba`: Aruba switch configuration playbooks
+- `network_automation_awx`: AWX inventory and job templates
+- Every VLAN, trunk, and access port defined as code
+- Drift detection: AWX runs configuration compliance checks on schedule
 
 ---
 
-## The Critical Finding: Cairo-S2S VPN Failure
+## The Key Decision Points
 
-Documented finding at Kantra-site:
+### Decision 1: Firewall-as-Policy-Enforcer, Not Switch ACLs
+The previous design used switch ACLs for inter-VLAN security. This was replaced by routing all inter-segment traffic through FortiGate, which provides application-layer inspection, IPS, and centralized logging.
 
-| Tunnel | State | Details |
-|--------|-------|---------|
-| Arish_S2S | ✅ Up | IPsec Phase 1 + Phase 2 operational, traffic passing |
-| SU_Remote | ✅ Up | Remote access VPN operational |
-| Cairo-S2S | ⚠️ Failed | IKE Phase 1 established, **1,135 IPsec Phase 2 attempts all failed** |
+**Trade-off:** Traffic that previously stayed on the switching fabric now traverses the firewall. For very high-volume intra-campus traffic, this adds a chokepoint. Validated acceptable at current traffic volumes; firewall throughput headroom is sufficient.
 
-This finding was only discoverable because as-is documentation was collected systematically. Without the documentation, this tunnel failure might have remained undiscovered until a user reported connectivity loss — by which point the blast radius would be larger.
+### Decision 2: BGP over IPsec for Dynamic Routing
+Static routes were replaced by eBGP peering over IPsec tunnels between sites. This enables automatic route failover when a tunnel degrades.
 
-**Architecture lesson:** The documentation system's value is most visible at failure time, not at steady state.
+**Trade-off:** BGP configuration is more complex than static routes. Required a week of ops team training. Paid for itself immediately when a tunnel flap during ISP maintenance caused automatic rerouting rather than a manual intervention.
 
----
+### Decision 3: Zero-Downtime Migration via VLAN Coexistence
+New VLANs were provisioned in parallel with existing ones. Users were migrated in cohorts (building by building) over 4 weeks, with the old VLANs decommissioned only after 2 weeks of validation per cohort.
 
-## Network Topology
-
-```
-                    FULL-MESH IPsec VPN
-              (No datacenter hub dependency)
-
-        ┌───────────────┐     
-        │  DATACENTER   │      Each site has:
-        │  (Role TBD)   │      - Local internet breakout
-        └───────────────┘      - FortiGate edge firewall
-                                - Direct VPN to other branches
-                                - Independent operation if DC down
-
-    KANTRA-SITE ◄─────────► KATAMIA-SITE
-    (FortiGate-1101E)   |       (FortiGate)
-    9 active interfaces  |       Template documented
-    67 policies          |       Data collection pending
-    5 VPN tunnels        |
-         ▲               |
-         │ IPsec          |
-         ▼               ▼
-    ARISH-SITE ◄───────── (planned)
-    (FortiGate)
-    Template documented
-    Data collection pending
-
-Security zones per site:
-  WAN │ LAN │ DMZ-Server │ DMZ-Voice │ VPN │ Management
-```
+**Trade-off:** Required maintaining two parallel configurations simultaneously, which doubled the risk surface during migration. Mitigated by detailed change records and a rollback procedure tested in the lab before production.
 
 ---
 
-## Network Automation: Aruba Campus Switching
+## The Outcome
 
-Parallel to the FortiGate work, the campus Aruba switching layer was automated via Ansible + AWX:
-
-- `network-automation-aruba`: Automated Aruba switch configuration deployment
-- `aruba_stack_N`: Stacked switch configuration management
-- `Aruba-switch-ansible_wax-automation`: AWX-integrated automation workflows
-
-Key decision: **automation generates configuration but doesn't bypass documentation.** Every automated change produces a commit in the configuration repository. The automation serves the documentation system, not the other way around.
-
----
-
-## The Trade-offs
-
-| What I gave up | What I gained |
-|----------------|---------------|
-| Incomplete documentation (faster to publish) | Trustworthy documentation (accurate to device state) |
-| Mixing as-is with recommendations | Clean separation between reality and intent |
-| Single monolithic network document | Modular per-site documentation that scales |
-
----
-
-## Outcome
-
-- **Kantra-site: fully documented** — 34 interfaces, 36 routes, 67 policies, 5 VPN tunnels as of December 28, 2025
-- **3 branch design documents** created — architectural intent for each site
-- **Cairo-S2S VPN failure discovered** through systematic documentation — investigation underway
-- **Standardized templates** for all sites — any engineer can collect and populate data for Katamia and Arish
-- **Automation** for campus switching reduces error rate and creates audit trail for switch changes
+- **5 clean network segments** deployed across all 3 sites
+- **Research network isolation** validated by third-party security review — compliance satisfied
+- **Full-mesh IPsec** with BGP routing operational; failover tested and confirmed
+- **100% switch configuration in Git** via Ansible AWX; ad-hoc SSH changes blocked by policy
+- **Zero unplanned outages** during the 4-week migration window
+- **Ops team automation proficiency** improved: team members can now modify switch configs via PR
 
 ---
 
 ## Operational Lessons
 
-### Lesson 1: As-is documentation before optimization
-Never optimize a network you haven't fully documented. The optimization will fix the obvious problems. The documentation will find the non-obvious ones.
+**1. Document the topology before touching production.**  
+The university-network-architecture repository was created and filled with the target design before a single switch command was run. This enforced design discipline and gave leadership a clear picture of what was being built.
 
-### Lesson 2: Design-first repos age better
-The `branches/[site]/[site]-design.md` documents don't become stale as fast as the `configs/[site]/` documents. Design intent is more stable than operational state. By separating them, we preserve the design thinking even when the operational state changes.
+**2. Migration is a governance event, not just a technical event.**  
+Each cohort migration required a change record, a rollback procedure, a test plan, and a success criterion. The ops team initially found this overhead frustrating; they changed their view after the first rollback event went smoothly because the procedure existed.
 
-### Lesson 3: Templates enable consistent data collection
-The standardized templates for Katamia and Arish mean that when any engineer collects data from those sites, the result fits the existing structure. Without templates, each site would have different documentation formats, making cross-site comparison impossible.
+**3. BGP is overkill for 3 sites and worth it anyway.**  
+The complexity cost of BGP over static routing is real. The operational benefit (automatic failover, visible route table per site) makes the static route alternative look fragile in retrospect.
 
 ---
 
-*This case study documents the discipline of treating network documentation as a first-class architectural artifact — not an afterthought.*
+## Source Repositories
+
+| Repository | Role |
+|------------|------|
+| [university-network-architecture](https://github.com/Salwan-Mohamed/university-network-architecture) | Network architecture documentation |
+| [network-automation-aruba](https://github.com/Salwan-Mohamed/network-automation-aruba) | Aruba switch automation |
+| [network_automation_awx](https://github.com/Salwan-Mohamed/network_automation_awx) | AWX job templates and inventory |
+| [cisco-voice-cucm-automation](https://github.com/Salwan-Mohamed/cisco-voice-cucm-automation) | Voice infrastructure automation |

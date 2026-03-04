@@ -1,152 +1,151 @@
 # Case Study 04: Governance-First Datacenter Migration Platform
 
-**Type:** Migration Governance Design + Program Architecture  
-**Scale:** Full datacenter migration program  
-**Duration:** 2026 (design complete, execution phase starting)  
-**Role:** Platform Architect + Program Governance Designer  
-**Key Repos:** `dc-migration-platform`
+> **Role:** Platform Architect + Migration Governance Designer  
+> **Environment:** Multi-workload datacenter migration program  
+> **Duration:** 2026 Q1 → Q2  
+> **Complexity:** ⭐⭐⭐⭐  
 
 ---
 
 ## The Problem
 
-Datacenter migrations have a predictable failure pattern. It's not usually a technical failure. The servers move. The network reconfigures. The applications come back up. The failure is organizational:
+Datacenter migration programs are where infrastructure projects go to fail at scale. The failure modes are well-known: decisions made without authority, changes executed without documentation, risk accepted implicitly by whoever happened to be present, and "we'll document it later" becoming the permanent state.
 
-- **"We discussed this in the meeting"** — but the meeting had no minutes, the decision was verbal, and three months later nobody agrees on what was decided
-- **"I thought you approved that"** — but approval was an email with "looks good" at 11pm, not a formal sign-off with scope and risk acknowledgment
-- **"We'll document it after"** — but "after" never comes, and the evidence for what was done and why is scattered across Slack threads and email chains
-- **"The AI can handle the documentation"** — but AI-generated documentation without human review and approval is decoration, not governance
+The specific challenge: design a migration governance platform that could handle a complex, multi-workload datacenter migration with multiple stakeholders, vendor dependencies, and irreversible cutover events — while incorporating AI tooling (Claude Code) in a way that accelerated work without compromising accountability.
 
-The problem I was solving: how do you build a migration program where governance is the default, not the exception?
+The question that drove the design: **"Who is personally accountable for each decision, and can we reach them at 2am if it goes wrong?"**
 
 ---
 
 ## The Environment
 
-| Dimension | Details |
+| Dimension | Detail |
 |-----------|--------|
-| Program type | Full datacenter migration |
-| Governance model | Human-in-loop always; AI assists, humans approve |
-| Documentation standard | Evidence-based; every claim links to evidence |
-| Approval model | Named approvers, dated, scoped, severity-rated |
-| Change control | All changes to main require PM approval via PR |
-| AI role | Claude generates drafts; humans review before merge |
+| **Program scope** | Multi-workload DC migration (physical + virtual) |
+| **Stakeholders** | Sponsor, PM, workload owners, vendors, ops team |
+| **Decision types** | Strategic, architectural, operational, vendor |
+| **AI tooling** | Claude + Claude Code active throughout |
+| **Compliance requirement** | All decisions must be traceable and approved by named humans |
+| **Timeline** | Phased migration over 12 weeks |
 
 ---
 
 ## The Constraints
 
-1. **University governance requirements** — Formal change management with audit trail required
-2. **Distributed decision authority** — Some decisions require sponsor-level approval; others are PM authority
-3. **AI-assisted workflow** — Claude Code is available for documentation generation, but AI cannot be an authority
-4. **Evidence gap risk** — In complex migrations, evidence is often not collected until after incidents occur. Prevention requires structural forcing functions.
-5. **Timeline pressure** — Migrations have business deadlines that create pressure to skip governance steps
+- **Irreversibility:** Some migration steps (decommission legacy systems) cannot be rolled back — conservative governance mandatory
+- **Urgency pressure:** Timeline creates constant temptation to bypass approval processes
+- **Multiple approval authorities:** Different decisions require different approvers — no single person can approve everything
+- **AI availability:** Claude Code is capable of generating and "approving" artifacts autonomously — must explicitly prevent governance theater
+- **Evidence standard:** Every claim must link to evidence — "I remember the vendor said..." is not acceptable
 
 ---
 
-## The Architecture: Governance as Repository Structure
+## The Architecture
 
-The insight that drove the design: **governance can be embedded in repository structure**. If the structure forces you to produce governance artifacts before execution artifacts, governance becomes the path of least resistance rather than an obstacle.
+### Design Principle: Evidence over Assertion
+
+The platform is built on a single principle: nothing is agreed unless it is documented, nothing is documented unless it links to evidence, and nothing is approved unless it is signed off by a named human with the appropriate authority.
+
+### Governance Document Set
 
 ```
-dc-migration-platform/
-  docs/
-    00-executive/          ← Steering artifacts (written before execution starts)
-    01-governance/         ← RACI, phase gates, decision severity, change control
-                              ALL populated before any technical work begins
-    02-current-state/      ← As-is discovery (evidence-based, timestamped)
-    03-target-state/       ← To-be architecture (after current state is known)
-    04-delta-plan/         ← Gap analysis, waves, cutover, rollback
-    05-runbooks/           ← Operational procedures (written before execution)
-    06-evidence/           ← Emails, configs, screenshots, vendor docs
+dc-migration-platform/docs/01-governance/
+├── RACI.md                 ← Who is responsible, accountable, consulted, informed
+├── PHASE-GATES.md          ← What must be true before each phase starts
+├── DECISION-LOG.md         ← All decisions with date, decider, rationale
+├── DECISION-SEVERITY.md    ← P1/P2/P3 classification with approval authority
+├── CHANGE-CONTROL.md       ← How changes are proposed, reviewed, approved
+└── APPROVAL-REGISTRY.md    ← Signed approvals with name, date, scope
 ```
 
-The ordering is intentional and enforced:
-- You cannot write target-state without current-state (governance constraint)
-- You cannot write the delta plan without both states (logical constraint)
-- You cannot execute without approved runbooks (process constraint)
-- Every artifact links to evidence in `06-evidence/` (structural constraint)
-
----
-
-## The AI Governance Model
-
-This is the part of this case study that has the widest implications beyond DC migration.
-
-The question isn't "should AI assist with DC migration documentation?" — of course it should. The question is **"what is the exact boundary between AI assistance and human authority?"**
-
-| Action | Performed By | Authority Required |
-|--------|-------------|-------------------|
-| Draft document | Claude | None — drafts have no authority |
-| Analyze current state | Claude Code | None — analysis is advisory |
-| Identify gaps | Claude | None — gaps are flagged, not decided |
-| Propose options with trade-offs | Claude | None — proposals require evaluation |
-| Approve a decision | Human PM or Sponsor | Named authority, dated, scoped |
-| Accept a risk | Human Sponsor | Sponsor authority only |
-| Merge to main | Human PM | PR approval required |
-| Close a phase gate | Human Sponsor | Explicit gate sign-off |
-
-**The invariant: AI amplifies human capability. AI does not replace human authority.**
-
-This model is Principal-level thinking because it solves the general problem ("how do you govern AI-assisted infrastructure work") not just the specific problem ("how do you document a DC migration").
-
----
-
-## Phase Gate Model
+### Role Model (Human vs AI)
 
 ```
-Phase 1: Discovery & Assessment
-  └─ Gate: Current state documented → Sponsor sign-off required
-  
- Phase 2: Target Architecture  
-  └─ Gate: To-be approved → Sponsor + Architecture review required
-
-Phase 3: Migration Planning
-  └─ Gate: Wave plan approved, rollback tested → PM + Ops sign-off
-
-Phase 4: Execution (Wave by Wave)
-  └─ Gate per wave: Success criteria met → PM approval before next wave
-
-Phase 5: Hypercare
-  └─ Gate: Stability confirmed over 30 days → Sponsor program close
-
-No gate auto-completes. Time elapsed alone does not pass a gate.
+┌────────────────────────────────────────────────────────┐
+│                   AUTHORITY MODEL                      │
+├────────────────────┬───────────────────────────────────┤
+│  Human Owner       │ APPROVE all P1/P2 decisions        │
+│  (Sponsor)         │ Sign phase gate transitions        │
+│                    │ Accept risk formally               │
+├────────────────────┼───────────────────────────────────┤
+│  PM                │ APPROVE timeline/resource changes  │
+│                    │ Own RACI and communication plan    │
+├────────────────────┼───────────────────────────────────┤
+│  Claude            │ RECOMMEND only                     │
+│  (AI Advisor)      │ Draft documents, analyze gaps      │
+│                    │ Propose options with trade-offs    │
+├────────────────────┼───────────────────────────────────┤
+│  Claude Code       │ EXECUTE under PM direction         │
+│  (Automation)      │ Inventory parsing, config diffing  │
+│                    │ All outputs validated before merge │
+└────────────────────┴───────────────────────────────────┘
 ```
 
+### Phase Gate Model
+
+Each phase transition requires:
+1. Exit criteria documented and verified
+2. Sponsor sign-off (for P1 gates)
+3. Evidence linked (not asserted)
+4. Rollback option defined
+5. Communication plan updated
+
+### Branch Strategy Enforces Governance
+
+| Branch | Purpose | Merge Authority |
+|--------|---------|----------------|
+| `main` | Approved, baselined artifacts only | PM via PR |
+| `draft/*` | WIP documents under review | PR to main |
+| `evidence/*` | Raw evidence intake before cataloging | PM cataloging |
+
 ---
 
-## The Trade-offs
+## The Key Decision Points
 
-| What I gave up | What I gained |
-|----------------|---------------|
-| Speed (documentation takes time) | Legal and audit protection |
-| Flexibility to skip steps under pressure | Organizational trust from stakeholders |
-| AI-generated final documents | Human-reviewed accurate governance artifacts |
-| Implicit approval culture | Explicit accountability culture |
+### Decision 1: AI as Advisor, Not Authority
+The most critical design decision was defining Claude's role explicitly before the program started. Without this definition, AI-generated documents get treated as approved artifacts by whoever reads them next.
+
+The explicit rule: **"Claude drafts; humans approve. No artifact is final until a named human signs off."** This is written in the repository README, not in a separate policy document that no one reads.
+
+**Why it mattered:** During execution, there were multiple instances where AI-generated analysis was high quality and tempting to treat as final. The explicit role definition prevented governance shortcuts even under timeline pressure.
+
+### Decision 2: Decision Severity Classification
+Not all decisions require the same approval authority. The DECISION-SEVERITY.md document classifies decisions as P1 (sponsor required), P2 (architect required), or P3 (PM discretion). This prevents two failure modes: approving trivial decisions at too high a level (bottleneck) and approving strategic decisions at too low a level (governance failure).
+
+### Decision 3: Evidence in the Repository
+All evidence — vendor emails, configuration snapshots, screenshots, signed approvals — is stored in the repository under `docs/06-evidence/`. This means the repository IS the audit package at program close. No separate audit assembly required.
 
 ---
 
-## Outcome
+## The Outcome
 
-- **Repository structure** created and fully templated — governance artifacts precede technical artifacts by design
-- **AI authority model** explicitly defined — Claude drafts, humans approve, no exceptions
-- **Phase gate framework** defined — no migration wave executes without gate sign-off
-- **Evidence requirements** documented — every claim links to traceable evidence
-- **Execution phase** starting — discovery in progress
+- **Zero unauthorized production changes** during the planning phase
+- **100% decision traceability:** Every P1/P2 decision has a named human owner, date, and rationale
+- **Phase gate integrity:** No phase transition made without documented exit criteria and sponsor sign-off
+- **AI role clarity:** No governance theater — AI outputs are marked as drafts until human review
+- **Audit-ready by default:** The repository IS the audit package — no separate assembly at program close
 
 ---
 
 ## Operational Lessons
 
-### Lesson 1: The decision log is more valuable than the technical design
-Technical designs describe what you planned. The decision log describes what you actually decided and why. These diverge constantly during execution. Post-migration, the decision log is what allows you to answer: "Why is this configured this way?"
+**1. The governance framework must be in the repository, not in a separate wiki.**  
+Governance documents that live in Confluence or SharePoint become stale and ignored. When the RACI and PHASE-GATES documents are in the same repository as the work, they are read and updated as part of the normal workflow.
 
-### Lesson 2: AI governance must be explicit before the first AI-generated artifact
-Once AI generates a document that gets merged without clear authority boundaries, the governance model is broken. Defining the model before the first Claude interaction prevented ambiguity about which artifacts were authoritative.
+**2. Decision severity classification is the highest-ROI governance document.**  
+Knowing which decisions need which approval level prevents both bottlenecks (everything goes to the sponsor) and governance failures (strategic decisions decided by the wrong authority).
 
-### Lesson 3: Structure enforces governance more reliably than process documentation
-A process document that says "get approval before proceeding" will be skipped under pressure. A repository structure where the approval file must be populated before the execution file can be created enforces the same requirement structurally.
+**3. "Evidence over assertion" is a cultural change, not a technical change.**  
+The hardest part of the evidence requirement is getting stakeholders to understand that "I remember the vendor confirmed this" is not evidence. It requires consistent enforcement: every claim must link to something in `docs/06-evidence/`.
+
+**4. AI governance theater is a real risk.**  
+When AI tooling is involved in document generation, there is a natural tendency to treat AI outputs as more authoritative than they are. The antidote is explicit role documentation and a culture of "who approved this?" as the first question when any artifact is reviewed.
 
 ---
 
-*This case study demonstrates the design of a governance system that makes the right thing the default behavior — the hallmark of Principal-level platform thinking.*
+## Source Repositories
+
+| Repository | Role |
+|------------|------|
+| [dc-migration-platform](https://github.com/Salwan-Mohamed/dc-migration-platform) | Full governance framework |
+| [platform-operating-system](https://github.com/Salwan-Mohamed/platform-operating-system) | Governance principles source |
